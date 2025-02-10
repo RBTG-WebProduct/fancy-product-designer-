@@ -12,10 +12,15 @@ fabric.Text.prototype.toImageSVG = function (args) {
 	let tempCliPath = this.clipPath;
 	this.clipPath = null;
 
-	const ctx = this._cacheCanvas?.toDataURL() && !this.shadow?.color ? this._cacheCanvas : this;
+	let multiplier = 1;
+	if (this?.canvas?.viewOptions?.printingBox && this?.canvas?.viewOptions?.output) {
+		const dpi = Math.ceil(
+			(this.canvas.viewOptions.printingBox.width * 25.4) / this.canvas.viewOptions.output.width
+		);
+		multiplier = parseInt(300 / dpi);
+	}
 
-	let svgDataURL = ctx.toDataURL({ withoutShadow: false });
-
+	let ctx = this;
 	let ctxWidth = ctx.width;
 	let ctxHeight = ctx.height;
 
@@ -25,6 +30,13 @@ fabric.Text.prototype.toImageSVG = function (args) {
 		ctxWidth += (Math.abs(shadow.offsetX) + shadow.blur) * 2;
 		ctxHeight += (Math.abs(shadow.offsetY) + shadow.blur) * 2;
 	}
+
+	let svgDataURL = ctx.toDataURL({
+		withoutShadow: false,
+		withoutTransform: true,
+		multiplier: multiplier,
+		enableRetinaScaling: false,
+	});
 
 	this.clipPath = tempCliPath;
 
@@ -45,145 +57,10 @@ fabric.Text.prototype.toImageSVG = function (args) {
 fabric.Text.prototype.toSVG = (function (originalFn) {
 	return function (...args) {
 		//convert text to image data uri in print mode for specific text options
-		if (
-			this.canvas.printMode &&
-			((this.curved && this.path) || this.opacity != 1 || this.shadow?.color || this.pattern)
-		) {
+		if (this.canvas.printMode && (this.opacity != 1 || this.shadow?.color || this.pattern)) {
 			return this.toImageSVG(args);
 		}
-
-		if (this.curved && this.path) {
-			let fontFamily = this.fontFamily.replace(/"/g, "'");
-			let fontSize = this.fontSize;
-			let fontStyle = this.fontStyle;
-			let fontWeight = this.fontWeight;
-			let fill = this.fill;
-			let letterSpacing = (this.letterSpacing / 10) * fontSize;
-			let textDecoration = this.textDecoration;
-			let opacity = this.opacity;
-			let textStroke = this.stroke;
-			let textStrokeWidth = this.strokeWidth;
-			let path = this.path;
-			let fillPath = path.fill ? path.fill : "none";
-			let strokePath = path.stroke ? path.stroke : "none";
-			let strokeWidth = path.strokeWidth ? path.strokeWidth : 0;
-			let display = path.visible ? "block" : "none";
-			// get path length
-			let pathData = this.path.path;
-			let pathInfo = fabric.util.getPathSegmentsInfo(pathData);
-			let pathLength = pathInfo[pathInfo.length - 1].length;
-
-			// reverse pathdata to emulate side="right"
-			if (this.pathSide === "right") {
-				// clone pathdata for reversing
-				pathData = JSON.parse(JSON.stringify(pathData));
-				pathData = reversePathData(pathData);
-			}
-			// get pathdata d string
-			let d = pathData.flat().join(" ");
-
-			let id = Math.random().toString(36).substr(2, 9);
-			let dominantbaseline = "auto";
-			let pathStartOffset = this.pathStartOffset;
-			let dy = 0;
-
-			// translate fabric.js baseline offsets to svg dominant baseline values
-			if (this.pathAlign === "center") {
-				dominantbaseline = "middle";
-			} else if (this.pathAlign === "baseline") {
-				dominantbaseline = "auto";
-			} else if (this.pathAlign === "ascender") {
-				dominantbaseline = "hanging";
-			} else if (this.pathAlign === "descender") {
-				dominantbaseline = "auto";
-				dy = (fontSize / 100) * -22;
-			}
-
-			let textAnchor = "start";
-			if (this.textAlign == "center") {
-				textAnchor = "middle";
-				pathStartOffset += pathLength / 2;
-			}
-
-			if (this.textAlign == "right") {
-				textAnchor = "end";
-				pathStartOffset += pathLength;
-			}
-
-			//----------------------------------------------
-
-			let textPaths = "";
-			let offset = pathStartOffset;
-			for (let i = 0; i < this.text.length; i++) {
-				let letter = this.text[i];
-				let text = new fabric.Text(letter, {
-					fontFamily, // Font family
-					fontSize, // Font size in pixels
-				});
-				let textPathEl = `<textPath 
-                  xlink:href="#textOnPath${id}" 
-                  startOffset="${offset < 0 ? offset + pathLength : offset}"
-                  dominant-baseline="${dominantbaseline}"
-                  dy="${dy}"
-                  style="
-                    stroke: ${textStroke};
-                    stroke-width: ${textStrokeWidth};
-                  "
-                >
-                  ${letter}
-                </textPath>`;
-				offset += text.width + 1 + letterSpacing;
-				textPaths += textPathEl;
-			}
-
-			//----------------------------------------------
-			// append texpath to defs or as rendered element
-			let textPathEl;
-
-			if ((fillPath && fillPath !== "none") || (!strokePath && strokePath !== "none")) {
-				textPathEl = `<path id="textOnPath${id}" display="${display}" fill="${fillPath}" stroke="${strokePath}" stroke-width="${strokeWidth}" d="${d}" style="display: none"/>`;
-			} else {
-				textPathEl = `<defs>
-          <path id="textOnPath${id}" d="${d}" />
-        </defs>`;
-			}
-
-			return this._createBaseSVGMarkup(
-				this.path?.path
-					? [
-							textPathEl,
-							`<text 
-                font-family="${fontFamily.replace(/"/g, "'")}" 
-                fill="${fill}"
-                font-size="${fontSize}" 
-                font-style="${fontStyle}" 
-                font-weight="${fontWeight}"
-                letter-spacing="${letterSpacing}"
-                style="
-                text-decoration: ${textDecoration};
-                opacity: ${opacity};
-                "
-                >
-                  ${textPaths}
-                </text>`,
-					  ]
-					: [
-							`<text 
-              xml:space="preserve" 
-              font-family="${fontFamily}" 
-              font-size="${fontSize}" 
-              font-style="${fontStyle}" 
-              font-weight="${fontWeight}" 
-              > 
-              ${this.addPaintOrder()}
-              ${this.text}
-              </text>`,
-					  ],
-				{ reviver: args[0], noStyle: true, withShadow: true }
-			);
-		} else {
-			return originalFn.call(this, ...args);
-		}
+		return originalFn.call(this, ...args);
 	};
 })(fabric.Text.prototype.toSVG);
 
@@ -348,11 +225,29 @@ fabric.Text.prototype._createTextCharSpan = function (_char, styleDecl, left, to
 	].join("");
 };
 
+fabric.Text.prototype._getSVGLeftTopOffsets = (function (originalFn) {
+	return function (...args) {
+		const offsets = originalFn.call(this, ...args);
+
+		//Change the left offset if direction is "rtl".  Note for "ltr" the original function sets textLeft to "-this.width / 2".
+		//This is to fix a bug where the SVG is placed in the wrong position when using "rtl".
+		if (this.direction === "rtl")
+			offsets.textLeft = this.width / 2;
+
+		return offsets;
+	}
+})(fabric.Text.prototype._getSVGLeftTopOffsets);
+
 fabric.Text.prototype._renderChars = (function (originalFn) {
 	return function (...args) {
-		originalFn.call(this, ...args);
+		//Change ctx direction to "rtl" if needed.  Fixes a bug where the text was drawn in the wrong position when 
+		//usePrintingBoxAsBounding set to 1.
+		if (this.direction === "rtl") {
+			const ctx = args[1];
+			if (ctx)
+				ctx.direction = "rtl";
+		}
 
-		//fix for rtl site
-		if (this.canvas) this.canvas.lowerCanvasEl.setAttribute("dir", "ltr");
+		originalFn.call(this, ...args);
 	};
 })(fabric.Text.prototype._renderChars);
